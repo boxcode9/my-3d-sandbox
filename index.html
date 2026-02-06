@@ -1,0 +1,172 @@
+html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Physics Sandbox</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        <h1>3D Sandbox</h1>
+        <p>Click/Tap to shoot spheres<br>Drag to rotate | Scroll to zoom</p>
+    </div>
+
+    <!-- Load Three.js and Cannon Physics via CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/+esm"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as CANNON from 'cannon-es';
+
+        // --- SETUP SCENE ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0a);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 15, 30);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        // --- PHYSICS WORLD ---
+        const world = new CANNON.World({
+            gravity: new CANNON.Vec3(0, -9.82, 0)
+        });
+
+        // --- MATERIALS ---
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+
+        // --- GROUND ---
+        const groundGeo = new THREE.PlaneGeometry(50, 50);
+        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        const groundBody = new CANNON.Body({
+            type: CANNON.Body.STATIC,
+            shape: new CANNON.Plane()
+        });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        // --- OBJECT TRACKING ---
+        const meshes = [];
+        const bodies = [];
+
+        function createBox(x, y, z) {
+            // Three.js Visual
+            const size = Math.random() * 2 + 0.5;
+            const geo = new THREE.BoxGeometry(size, size, size);
+            const mesh = new THREE.Mesh(geo, boxMat);
+            mesh.castShadow = true;
+            scene.add(mesh);
+            meshes.push(mesh);
+
+            // Cannon-es Physics
+            const shape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
+            const body = new CANNON.Body({ mass: 1, shape: shape });
+            body.position.set(x, y, z);
+            world.addBody(body);
+            bodies.push(body);
+        }
+
+        // Create a starting pile of boxes
+        for(let i = 0; i < 10; i++) {
+            createBox(Math.random() * 5 - 2.5, i * 3 + 5, Math.random() * 5 - 2.5);
+        }
+
+        // --- SHOOTING FUNCTION ---
+        const ballGeo = new THREE.SphereGeometry(0.5, 32, 32);
+        const ballMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff88, emissiveIntensity: 0.5 });
+
+        window.addEventListener('click', (event) => {
+            // Only fire if not dragging
+            if (event.target !== renderer.domElement) return;
+
+            const ballMesh = new THREE.Mesh(ballGeo, ballMat);
+            ballMesh.castShadow = true;
+            scene.add(ballMesh);
+            meshes.push(ballMesh);
+
+            const ballBody = new CANNON.Body({
+                mass: 5,
+                shape: new CANNON.Sphere(0.5)
+            });
+            
+            // Position ball at camera
+            ballBody.position.set(camera.position.x, camera.position.y, camera.position.z);
+            
+            // Shoot in direction camera is facing
+            const vector = new THREE.Vector3(0, 0, -1);
+            vector.applyQuaternion(camera.quaternion);
+            ballBody.velocity.set(vector.x * 40, vector.y * 40, vector.z * 40);
+            
+            world.addBody(ballBody);
+            bodies.push(ballBody);
+        });
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Step physics
+            world.fixedStep();
+
+            // Sync Visuals with Physics
+            for (let i = 0; i < meshes.length; i++) {
+                meshes[i].position.copy(bodies[i].position);
+                meshes[i].quaternion.copy(bodies[i].quaternion);
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
